@@ -604,6 +604,29 @@ std::string VersionEdit::DebugString(bool hex_key) const {
   return r;
 }
 
+void VersionEdit::PrintSstStuff(int edit_num) {
+  if (!deleted_files_.empty()) {
+    for (DeletedFileSet::const_iterator iter = deleted_files_.begin();
+        iter != deleted_files_.end();
+        ++iter) {
+      printf("edit %d: deleted sst file (level %d): %06lu.sst\n",
+          edit_num, iter->first, iter->second);
+    }
+  }
+
+  if (!new_files_.empty()) {
+    for (size_t i = 0; i < new_files_.size(); i++) {
+      const FileMetaData& f = new_files_[i].second;
+      printf("edit % 5d: added sst file: %06lu.sst (level %d) (%lu bytes)\n"
+             "    first key: %s\n"
+             "    last key:  %s\n",
+             edit_num, f.fd.GetNumber(), new_files_[i].first,
+             f.fd.GetFileSize(), f.smallest.DebugString(false).c_str(),
+             f.largest.DebugString(false).c_str());
+    }
+  }
+}
+
 std::string VersionEdit::DebugJSON(int edit_num, bool hex_key) const {
   JSONWriter jw;
   jw << "EditNumber" << edit_num;

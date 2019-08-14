@@ -171,6 +171,25 @@ class ManifestDumpCommand : public LDBCommand {
   static const std::string ARG_PATH;
 };
 
+class SstOverviewCommand : public LDBCommand {
+ public:
+  static std::string Name() { return "sst_overview"; }
+
+  SstOverviewCommand(const std::vector<std::string>& params,
+                      const std::map<std::string, std::string>& options,
+                      const std::vector<std::string>& flags);
+
+  static void Help(std::string& ret);
+  virtual void DoCommand() override;
+
+  virtual bool NoDBOpen() override { return true; }
+
+ private:
+  std::string path_;
+
+  static const std::string ARG_PATH;
+};
+
 class ListColumnFamiliesCommand : public LDBCommand {
  public:
   static std::string Name() { return "list_column_families"; }

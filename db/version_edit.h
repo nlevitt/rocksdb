@@ -311,6 +311,7 @@ class VersionEdit {
 
   std::string DebugString(bool hex_key = false) const;
   std::string DebugJSON(int edit_num, bool hex_key = false) const;
+  void PrintSstStuff(int edit_num);
 
  private:
   friend class ReactiveVersionSet;

@@ -3927,6 +3927,126 @@ Status VersionSet::ReduceNumberOfLevels(const std::string& dbname,
       mutable_cf_options, &ve, &dummy_mutex, nullptr, true);
 }
 
+Status VersionSet::SstOverview(Options& options, std::string& dscname) {
+  // Open the specified manifest file.
+  std::unique_ptr<SequentialFileReader> file_reader;
+  Status s;
+  {
+    std::unique_ptr<SequentialFile> file;
+    s = options.env->NewSequentialFile(
+        dscname, &file, env_->OptimizeForManifestRead(env_options_));
+    if (!s.ok()) {
+      return s;
+    }
+    file_reader.reset(new SequentialFileReader(std::move(file), dscname));
+  }
+
+  int count = 0;
+  std::unordered_map<uint32_t, std::string> comparators;
+  std::unordered_map<uint32_t, std::unique_ptr<BaseReferencedVersionBuilder>>
+      builders;
+
+  // add default column family
+  VersionEdit default_cf_edit;
+  default_cf_edit.AddColumnFamily(kDefaultColumnFamilyName);
+  default_cf_edit.SetColumnFamily(0);
+  ColumnFamilyData* default_cfd =
+      CreateColumnFamily(ColumnFamilyOptions(options), &default_cf_edit);
+  builders.insert(
+      std::make_pair(0, std::unique_ptr<BaseReferencedVersionBuilder>(
+                            new BaseReferencedVersionBuilder(default_cfd))));
+
+  {
+    VersionSet::LogReporter reporter;
+    reporter.status = &s;
+    log::Reader reader(nullptr, std::move(file_reader), &reporter,
+                       true /* checksum */, 0 /* log_number */);
+    Slice record;
+    std::string scratch;
+    while (reader.ReadRecord(&record, &scratch) && s.ok()) {
+      VersionEdit edit;
+      s = edit.DecodeFrom(record);
+      if (!s.ok()) {
+        break;
+      }
+
+      // Write out each individual edit
+      // printf("%s\n", edit.DebugJSON(count, false).c_str());
+      edit.PrintSstStuff(count);
+      count++;
+
+      bool cf_in_builders =
+          builders.find(edit.column_family_) != builders.end();
+
+      if (edit.has_comparator_) {
+        comparators.insert({edit.column_family_, edit.comparator_});
+      }
+
+      ColumnFamilyData* cfd = nullptr;
+
+      if (edit.is_column_family_add_) {
+        if (cf_in_builders) {
+          s = Status::Corruption(
+              "Manifest adding the same column family twice");
+          break;
+        }
+        cfd = CreateColumnFamily(ColumnFamilyOptions(options), &edit);
+        cfd->set_initialized();
+        builders.insert(std::make_pair(
+            edit.column_family_, std::unique_ptr<BaseReferencedVersionBuilder>(
+                                     new BaseReferencedVersionBuilder(cfd))));
+      } else if (edit.is_column_family_drop_) {
+        if (!cf_in_builders) {
+          s = Status::Corruption(
+              "Manifest - dropping non-existing column family");
+          break;
+        }
+        auto builder_iter = builders.find(edit.column_family_);
+        builders.erase(builder_iter);
+        comparators.erase(edit.column_family_);
+        cfd = column_family_set_->GetColumnFamily(edit.column_family_);
+        assert(cfd != nullptr);
+        cfd->Unref();
+        delete cfd;
+        cfd = nullptr;
+      } else {
+        if (!cf_in_builders) {
+          s = Status::Corruption(
+              "Manifest record referencing unknown column family");
+          break;
+        }
+
+        cfd = column_family_set_->GetColumnFamily(edit.column_family_);
+        // this should never happen since cf_in_builders is true
+        assert(cfd != nullptr);
+
+        // if it is not column family add or column family drop,
+        // then it's a file add/delete, which should be forwarded
+        // to builder
+        auto builder = builders.find(edit.column_family_);
+        assert(builder != builders.end());
+        builder->second->version_builder()->Apply(&edit);
+      }
+
+      if (cfd != nullptr && edit.has_log_number_) {
+        cfd->SetLogNumber(edit.log_number_);
+      }
+
+
+      if (edit.has_max_column_family_) {
+        column_family_set_->UpdateMaxColumnFamily(edit.max_column_family_);
+      }
+
+      if (edit.has_min_log_number_to_keep_) {
+        MarkMinLogNumberToKeep2PC(edit.min_log_number_to_keep_);
+      }
+    }
+  }
+  file_reader.reset();
+
+  return s;
+}
+
 Status VersionSet::DumpManifest(Options& options, std::string& dscname,
                                 bool verbose, bool hex, bool json) {
   // Open the specified manifest file.

@@ -834,6 +834,8 @@ class VersionSet {
   Status DumpManifest(Options& options, std::string& manifestFileName,
                       bool verbose, bool hex = false, bool json = false);
 
+  Status SstOverview(Options& options, std::string& manifestFileName);
+
 #endif  // ROCKSDB_LITE
 
   // Return the current manifest file number

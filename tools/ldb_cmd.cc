@@ -218,6 +218,10 @@ LDBCommand* LDBCommand::SelectCommand(const ParsedParams& parsed_params) {
     return new ManifestDumpCommand(parsed_params.cmd_params,
                                    parsed_params.option_map,
                                    parsed_params.flags);
+  } else if (parsed_params.cmd == SstOverviewCommand::Name()) {
+    return new SstOverviewCommand(parsed_params.cmd_params,
+                                   parsed_params.option_map,
+                                   parsed_params.flags);
   } else if (parsed_params.cmd == ListColumnFamiliesCommand::Name()) {
     return new ListColumnFamiliesCommand(parsed_params.cmd_params,
                                          parsed_params.option_map,
@@ -1050,6 +1054,105 @@ void ManifestDumpCommand::DoCommand() {
   if (verbose_) {
     printf("Processing Manifest file %s done\n", manifestfile.c_str());
   }
+}
+
+// ----------------------------------------------------------------------------
+namespace {
+
+void SstOverview(Options options, std::string file) {
+  EnvOptions sopt;
+  std::string dbname("dummy");
+  std::shared_ptr<Cache> tc(NewLRUCache(options.max_open_files - 10,
+                                        options.table_cache_numshardbits));
+  // Notice we are using the default options not through SanitizeOptions(),
+  // if VersionSet::DumpManifest() depends on any option done by
+  // SanitizeOptions(), we need to initialize it manually.
+  options.db_paths.emplace_back("dummy", 0);
+  options.num_levels = 64;
+  WriteController wc(options.delayed_write_rate);
+  WriteBufferManager wb(options.db_write_buffer_size);
+  ImmutableDBOptions immutable_db_options(options);
+  VersionSet versions(dbname, &immutable_db_options, sopt, tc.get(), &wb, &wc);
+  // Status s = versions.DumpManifest(options, file, false, false, true);
+  Status s = versions.SstOverview(options, file);
+  if (!s.ok()) {
+    printf("Error in processing file %s %s\n", file.c_str(),
+           s.ToString().c_str());
+  }
+}
+
+}  // namespace
+
+const std::string SstOverviewCommand::ARG_PATH = "path";
+
+void SstOverviewCommand::Help(std::string& ret) {
+  ret.append("  ");
+  ret.append(SstOverviewCommand::Name());
+  ret.append(" [--" + ARG_PATH + "=<path_to_manifest_file>]");
+  ret.append("\n");
+}
+
+SstOverviewCommand::SstOverviewCommand(
+    const std::vector<std::string>& /*params*/,
+    const std::map<std::string, std::string>& options,
+    const std::vector<std::string>& flags)
+    : LDBCommand(
+          options, flags, false,
+          BuildCmdLineOptions({ARG_PATH})),
+      path_("") {
+
+  std::map<std::string, std::string>::const_iterator itr =
+      options.find(ARG_PATH);
+  if (itr != options.end()) {
+    path_ = itr->second;
+    if (path_.empty()) {
+      exec_state_ = LDBCommandExecuteResult::Failed("--path: missing pathname");
+    }
+  }
+}
+
+void SstOverviewCommand::DoCommand() {
+
+  std::string manifestfile;
+
+  if (!path_.empty()) {
+    manifestfile = path_;
+  } else {
+    bool found = false;
+    // We need to find the manifest file by searching the directory
+    // containing the db for files of the form MANIFEST_[0-9]+
+
+    auto CloseDir = [](DIR* p) { closedir(p); };
+    std::unique_ptr<DIR, decltype(CloseDir)> d(opendir(db_path_.c_str()),
+                                               CloseDir);
+
+    if (d == nullptr) {
+      exec_state_ =
+          LDBCommandExecuteResult::Failed(db_path_ + " is not a directory");
+      return;
+    }
+    struct dirent* entry;
+    while ((entry = readdir(d.get())) != nullptr) {
+      unsigned int match;
+      uint64_t num;
+      if (sscanf(entry->d_name, "MANIFEST-%" PRIu64 "%n", &num, &match) &&
+          match == strlen(entry->d_name)) {
+        if (!found) {
+          manifestfile = db_path_ + "/" + std::string(entry->d_name);
+          found = true;
+        } else {
+          exec_state_ = LDBCommandExecuteResult::Failed(
+              "Multiple MANIFEST files found; use --path to select one");
+          return;
+        }
+      }
+    }
+  }
+
+  printf("Processing Manifest file %s\n", manifestfile.c_str());
+
+  // DumpManifestFile(options_, manifestfile, verbose_, is_key_hex_, json_);
+  SstOverview(options_, manifestfile);
 }
 
 // ----------------------------------------------------------------------------
