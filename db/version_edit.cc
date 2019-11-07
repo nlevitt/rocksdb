@@ -617,7 +617,7 @@ void VersionEdit::PrintSstStuff(int edit_num) {
   if (!new_files_.empty()) {
     for (size_t i = 0; i < new_files_.size(); i++) {
       const FileMetaData& f = new_files_[i].second;
-      printf("edit % 5d: added sst file: %06lu.sst (level %d) (%lu bytes)\n"
+      printf("edit %d: added sst file: %06lu.sst (level %d) (%lu bytes)\n"
              "    first key: %s\n"
              "    last key:  %s\n",
              edit_num, f.fd.GetNumber(), new_files_[i].first,

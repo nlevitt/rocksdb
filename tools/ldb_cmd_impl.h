@@ -176,8 +176,8 @@ class SstOverviewCommand : public LDBCommand {
   static std::string Name() { return "sst_overview"; }
 
   SstOverviewCommand(const std::vector<std::string>& params,
-                      const std::map<std::string, std::string>& options,
-                      const std::vector<std::string>& flags);
+                     const std::map<std::string, std::string>& options,
+                     const std::vector<std::string>& flags);
 
   static void Help(std::string& ret);
   virtual void DoCommand() override;
